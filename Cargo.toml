@@ -13,8 +13,8 @@ default = []
 # Shared audio feature extraction (mel spectrogram, CTC decode, etc.)
 audio-features = ["dep:ndarray", "dep:rustfft"]
 
-# ONNX-based models (SenseVoice, GigaAM, Parakeet, Moonshine, Canary)
-onnx = ["audio-features", "dep:ort", "dep:base64", "dep:regex", "dep:once_cell"]
+# ONNX-based models (SenseVoice, GigaAM, Parakeet, Moonshine, Canary, Voxtral)
+onnx = ["audio-features", "dep:ort", "dep:base64", "dep:regex", "dep:once_cell", "dep:tokenizers"]
 
 # Whisper via whisper.cpp (CPU-only by default; add whisper-metal, whisper-vulkan, or whisper-cuda for GPU)
 whisper-cpp = ["dep:whisper-rs", "whisper-rs/raw-api"]
@@ -66,6 +66,7 @@ regex = { version = "1.11.2", optional = true }
 once_cell = { version = "1.21.3", optional = true }
 rustfft = { version = "6", optional = true }
 base64 = { version = "0.22", optional = true }
+tokenizers = { version = "0.21", optional = true, default-features = false, features = ["onig"] }
 
 # Whisperfile
 ureq = { version = "3", optional = true }
@@ -115,6 +116,10 @@ name = "cohere"
 required-features = ["onnx"]
 
 [[example]]
+name = "voxtral"
+required-features = ["onnx"]
+
+[[example]]
 name = "whisperfile"
 required-features = ["whisperfile"]
 
@@ -152,6 +157,10 @@ required-features = ["onnx"]
 
 [[test]]
 name = "cohere"
+required-features = ["onnx"]
+
+[[test]]
+name = "voxtral"
 required-features = ["onnx"]
 
 [[test]]

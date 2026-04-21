@@ -26,3 +26,4 @@ pub mod gigaam;
 pub mod moonshine;
 pub mod parakeet;
 pub mod sense_voice;
+pub mod voxtral;
