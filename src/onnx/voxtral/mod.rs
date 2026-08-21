@@ -101,6 +101,18 @@ impl VoxtralModel {
     /// `q4f16`, `int8`, `quantized`, `bnb4`, `uint8`. Unknown variants fall
     /// back to the FP32 file.
     pub fn load(model_dir: &Path, quantization: &Quantization) -> Result<Self, TranscribeError> {
+        Self::load_with_quants(model_dir, quantization, quantization)
+    }
+
+    /// Load with separate quantization for the audio encoder vs. the text
+    /// stack (embed_tokens + decoder). Lets callers pair a CoreML-friendly
+    /// FP16 encoder with a Q4 decoder (decoder FP16 exceeds ORT's 2 GB
+    /// protobuf limit).
+    pub fn load_with_quants(
+        model_dir: &Path,
+        encoder_quant: &Quantization,
+        decoder_quant: &Quantization,
+    ) -> Result<Self, TranscribeError> {
         if !model_dir.exists() {
             return Err(TranscribeError::ModelNotFound(model_dir.to_path_buf()));
         }
@@ -113,9 +125,9 @@ impl VoxtralModel {
             model_dir.to_path_buf()
         };
 
-        let audio_encoder_path = resolve_onnx(&onnx_dir, "audio_encoder", quantization);
-        let embed_tokens_path = resolve_onnx(&onnx_dir, "embed_tokens", quantization);
-        let decoder_path = resolve_onnx(&onnx_dir, "decoder_model_merged", quantization);
+        let audio_encoder_path = resolve_onnx(&onnx_dir, "audio_encoder", encoder_quant);
+        let embed_tokens_path = resolve_onnx(&onnx_dir, "embed_tokens", decoder_quant);
+        let decoder_path = resolve_onnx(&onnx_dir, "decoder_model_merged", decoder_quant);
 
         for p in [&audio_encoder_path, &embed_tokens_path, &decoder_path] {
             if !p.exists() {
@@ -123,14 +135,26 @@ impl VoxtralModel {
             }
         }
 
+        // Per-session EP strategy:
+        // * audio_encoder — uses the global accelerator (e.g. CoreML on macOS).
+        //   The encoder is a fixed 30 s graph, no KV state, and FP16 weights
+        //   map cleanly to CoreML's Neural Engine / Metal.
+        // * embed_tokens — lookup-heavy, trivially fast on CPU; no benefit
+        //   from GPU dispatch.
+        // * decoder_model_merged — stores weights in external `.onnx_data`
+        //   sidecars, which CoreML's subgraph partitioner can't resolve
+        //   (the subgraph path loses the base-path context at compile time,
+        //   producing `initializer.cc !model_path.empty()` errors). Forcing
+        //   CPU avoids that failure and side-steps the Q4 `MatMulNBits`
+        //   custom op which CoreML has no native kernel for.
         log::info!("Loading Voxtral audio_encoder from {:?}", audio_encoder_path);
         let audio_encoder = ort_session::create_session(&audio_encoder_path)?;
 
         log::info!("Loading Voxtral embed_tokens from {:?}", embed_tokens_path);
-        let embed_tokens = ort_session::create_session(&embed_tokens_path)?;
+        let embed_tokens = ort_session::create_session_cpu_only(&embed_tokens_path)?;
 
         log::info!("Loading Voxtral decoder from {:?}", decoder_path);
-        let decoder = ort_session::create_session(&decoder_path)?;
+        let decoder = ort_session::create_session_cpu_only(&decoder_path)?;
 
         let tokenizer_path = model_dir.join("tokenizer.json");
         if !tokenizer_path.exists() {

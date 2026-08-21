@@ -30,15 +30,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let audio_duration = get_audio_duration(&wav_path)?;
     println!("Audio duration: {:.2}s", audio_duration);
 
+    // Prefer FP16 encoder (CoreML-friendly) paired with Q4 decoder (keeps
+    // decoder under ORT's 2 GB protobuf limit). Falls back to symmetric
+    // Int4 or FP32 if the FP16 encoder isn't present.
     let load_start = Instant::now();
-    let mut model = match VoxtralModel::load(&model_path, &Quantization::Int4) {
+    let mut model = match VoxtralModel::load_with_quants(
+        &model_path,
+        &Quantization::Int4,
+        &Quantization::Int4,
+    ) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("Int4 load failed: {e}; retrying FP16");
-            match VoxtralModel::load(&model_path, &Quantization::FP16) {
+            eprintln!("FP16/Int4 load failed: {e}; retrying all-Int4");
+            match VoxtralModel::load(&model_path, &Quantization::Int4) {
                 Ok(m) => m,
                 Err(e) => {
-                    eprintln!("FP16 load failed: {e}; retrying FP32");
+                    eprintln!("Int4 load failed: {e}; retrying FP32");
                     VoxtralModel::load(&model_path, &Quantization::FP32)?
                 }
             }

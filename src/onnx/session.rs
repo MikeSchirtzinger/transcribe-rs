@@ -150,6 +150,19 @@ fn build_session(
     intra_threads: Option<usize>,
     parallel_execution: bool,
 ) -> Result<Session, ort::Error> {
+    build_session_with_eps(path, intra_threads, parallel_execution, execution_providers())
+}
+
+/// Build a session with an explicit EP list. Use when a specific session
+/// should run CPU-only (e.g. graphs with external-data sidecars that CoreML's
+/// subgraph partitioner can't resolve) while the rest of the model uses the
+/// global accelerator preference.
+fn build_session_with_eps(
+    path: &Path,
+    intra_threads: Option<usize>,
+    parallel_execution: bool,
+    eps: Vec<ort::ep::ExecutionProviderDispatch>,
+) -> Result<Session, ort::Error> {
     let mut builder =
         Session::builder()?.with_optimization_level(GraphOptimizationLevel::Level3)?;
 
@@ -178,7 +191,7 @@ fn build_session(
     }
 
     let session = builder
-        .with_execution_providers(execution_providers())?
+        .with_execution_providers(eps)?
         .commit_from_file(path)?;
 
     for input in session.inputs() {
@@ -207,6 +220,13 @@ pub fn create_session(path: &Path) -> Result<Session, ort::Error> {
 /// Create an ONNX session with configurable thread count.
 pub fn create_session_with_threads(path: &Path, num_threads: usize) -> Result<Session, ort::Error> {
     build_session(path, Some(num_threads), true)
+}
+
+/// Create a CPU-only ONNX session. Use for graphs that shouldn't be touched
+/// by GPU/NPU EPs, e.g. models loaded from ONNX external-data sidecars (which
+/// CoreML's subgraph partitioner can't resolve).
+pub fn create_session_cpu_only(path: &Path) -> Result<Session, ort::Error> {
+    build_session_with_eps(path, None, true, vec![CPU::default().build()])
 }
 
 /// Resolve a model file path for the requested quantization level.
